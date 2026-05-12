@@ -9,11 +9,10 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 try:
     import streamlit as st
-    if hasattr(st, "secrets"):
-        if "SUPABASE_URL" in st.secrets:
-            SUPABASE_URL = st.secrets["SUPABASE_URL"]
-        if "SUPABASE_KEY" in st.secrets:
-            SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    if "SUPABASE_URL" in st.secrets:
+        SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    if "SUPABASE_KEY" in st.secrets:
+        SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except Exception:
     pass
 
