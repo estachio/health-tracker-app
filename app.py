@@ -12,7 +12,7 @@ def apply_custom_styles():
     .stApp { background-color: #f4f7fb; }
     .block-container { max-width: 1000px; padding-top: 1.5rem; padding-bottom: 2rem; }
 
-    h1, h2, h3, label, p {
+    h1, h2, h3, label, p, div, span {
         color: #1f1f1f;
     }
 
@@ -37,7 +37,7 @@ def apply_custom_styles():
 
     .summary-label {
         font-size: 14px;
-        color: #6c757d;
+        color: #6c757d !important;
         margin-bottom: 8px;
         font-weight: 600;
     }
@@ -45,7 +45,7 @@ def apply_custom_styles():
     .summary-value {
         font-size: 28px;
         font-weight: 700;
-        color: #212529;
+        color: #212529 !important;
     }
 
     .section-header-orange, .section-header-pink, .section-header-blue,
@@ -69,9 +69,36 @@ def apply_custom_styles():
         border-radius: 12px;
         font-weight: 600;
         width: 100%;
+        background-color: #1f2430;
+        color: white !important;
+        border: 1px solid #2f3542;
+    }
+
+    div.stButton > button p, 
+    div.stButton > button span,
+    div.stFormSubmitButton > button p,
+    div.stFormSubmitButton > button span {
+        color: white !important;
     }
 
     input, textarea {
+        color: #1f1f1f !important;
+        background-color: white !important;
+    }
+
+    [data-baseweb="input"] input,
+    [data-baseweb="base-input"] input,
+    [data-baseweb="textarea"] textarea {
+        color: #1f1f1f !important;
+        -webkit-text-fill-color: #1f1f1f !important;
+        background-color: white !important;
+    }
+
+    [data-baseweb="select"] > div,
+    [data-baseweb="input"] > div,
+    [data-baseweb="base-input"] > div,
+    [data-baseweb="textarea"] > div {
+        background-color: white !important;
         color: #1f1f1f !important;
     }
     </style>
