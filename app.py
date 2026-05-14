@@ -188,11 +188,21 @@ def load_table_for_user(table_name, user_id, order_column="entry_date"):
     return pd.DataFrame(response.data if response.data else [])
 
 
-def prepare_daily_series(df, date_col, value_col):
-    if df.empty or date_col not in df.columns or value_col not in df.columns:
+def prepare_daily_series(df, date_col, value_col, start_date=None, end_date=None):
+    if date_col not in df.columns or value_col not in df.columns:
         return pd.DataFrame()
 
     working_df = df.copy()
+
+    if working_df.empty:
+        if start_date is None or end_date is None:
+            return pd.DataFrame()
+        full_date_range = pd.date_range(start=start_date, end=end_date, freq="D")
+        return pd.DataFrame({
+            date_col: full_date_range,
+            value_col: [0] * len(full_date_range)
+        })
+
     working_df[date_col] = pd.to_datetime(working_df[date_col])
 
     daily = (
@@ -201,15 +211,14 @@ def prepare_daily_series(df, date_col, value_col):
         .sort_values(date_col)
     )
 
-    full_date_range = pd.date_range(
-        start=daily[date_col].min(),
-        end=daily[date_col].max(),
-        freq="D"
-    )
+    start_date = pd.to_datetime(start_date) if start_date is not None else daily[date_col].min()
+    end_date = pd.to_datetime(end_date) if end_date is not None else daily[date_col].max()
 
+    full_date_range = pd.date_range(start=start_date, end=end_date, freq="D")
     full_df = pd.DataFrame({date_col: full_date_range})
     daily = full_df.merge(daily, on=date_col, how="left")
     daily[value_col] = daily[value_col].fillna(0)
+
     return daily
 
 
@@ -248,13 +257,27 @@ def show_flash_message():
         st.session_state.flash_message = None
 
 
+def build_selector_options(df, label_builder):
+    options = []
+    for _, row in df.iterrows():
+        row_id = int(row["id"])
+        label = label_builder(row)
+        options.append((label, row_id))
+    return options
+
+
+def get_selected_row(df, selected_label, options):
+    selected_id = dict(options)[selected_label]
+    return df[df["id"].astype(int) == int(selected_id)].iloc[0]
+
+
 st.set_page_config(page_title="Health Tracker", layout="wide")
 apply_custom_styles()
 
 if "user" not in st.session_state:
     st.session_state.user = None
 if "page" not in st.session_state:
-    st.session_state.page = "Log Entry"
+    st.session_state.page = "View Day"
 if "flash_message" not in st.session_state:
     st.session_state.flash_message = None
 
@@ -323,17 +346,14 @@ else:
 
     st.caption(f"Logged in as {user.email}")
 
-    top1, top2, top3, top4 = st.columns([1, 1, 1, 1])
+    top1, top2, top3 = st.columns([1, 1, 1])
     with top1:
-        if st.button("📝 Log Entry"):
-            st.session_state.page = "Log Entry"
-    with top2:
         if st.button("📅 View Day"):
             st.session_state.page = "View Day"
-    with top3:
+    with top2:
         if st.button("📈 View Trends"):
             st.session_state.page = "View Trends"
-    with top4:
+    with top3:
         if st.button("Log out"):
             clear_login_cookie()
             st.session_state.user = None
@@ -342,110 +362,7 @@ else:
 
     page = st.session_state.page
 
-    if page == "Log Entry":
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-header-dark">Choose what to log</div>', unsafe_allow_html=True)
-        entry_type = st.selectbox("Entry type", ["Food", "Hydration", "Sleep", "Bowel Movement", "Mood"])
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        if entry_type == "Food":
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-header-orange">🍽️ Food</div>', unsafe_allow_html=True)
-            with st.form("food_form"):
-                entry_date = st.date_input("Date", value=date.today(), key="food_date")
-                meal_type = st.selectbox("Meal type", ["Breakfast", "Lunch", "Dinner", "Snack"])
-                food_notes = st.text_area("Food notes")
-                calories = st.number_input("Calories", min_value=0, step=10)
-                submitted = st.form_submit_button("Save food entry")
-                if submitted:
-                    supabase.table("food_entries").insert({
-                        "user_id": user_id,
-                        "entry_date": entry_date.isoformat(),
-                        "meal_type": meal_type,
-                        "food_notes": food_notes or None,
-                        "calories": int(calories)
-                    }).execute()
-                    st.session_state.flash_message = "Food entry saved."
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        elif entry_type == "Hydration":
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-header-pink">💧 Hydration</div>', unsafe_allow_html=True)
-            with st.form("hydration_form"):
-                entry_date = st.date_input("Date", value=date.today(), key="hydration_date")
-                amount_litres = st.number_input("Amount (litres)", min_value=0.0, step=0.1)
-                drink_type = st.text_input("Drink type")
-                submitted = st.form_submit_button("Save hydration entry")
-                if submitted:
-                    supabase.table("hydration_entries").insert({
-                        "user_id": user_id,
-                        "entry_date": entry_date.isoformat(),
-                        "amount_litres": float(amount_litres),
-                        "drink_type": drink_type or None
-                    }).execute()
-                    st.session_state.flash_message = "Hydration entry saved."
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        elif entry_type == "Sleep":
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-header-blue">😴 Sleep</div>', unsafe_allow_html=True)
-            with st.form("sleep_form"):
-                entry_date = st.date_input("Date", value=date.today(), key="sleep_date")
-                sleep_hours = st.number_input("Sleep hours", min_value=0.0, step=0.5)
-                sleep_quality = st.selectbox("Sleep quality", ["Poor", "OK", "Good", "Great"])
-                submitted = st.form_submit_button("Save sleep entry")
-                if submitted:
-                    supabase.table("sleep_entries").insert({
-                        "user_id": user_id,
-                        "entry_date": entry_date.isoformat(),
-                        "sleep_hours": float(sleep_hours),
-                        "sleep_quality": sleep_quality
-                    }).execute()
-                    st.session_state.flash_message = "Sleep entry saved."
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        elif entry_type == "Bowel Movement":
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-header-green">🩺 Bowel Movement</div>', unsafe_allow_html=True)
-            with st.form("bowel_form"):
-                entry_date = st.date_input("Date", value=date.today(), key="bowel_date")
-                event_time = st.text_input("Time", placeholder="e.g. 07:30")
-                notes = st.text_area("Notes")
-                submitted = st.form_submit_button("Save bowel entry")
-                if submitted:
-                    supabase.table("bowel_entries").insert({
-                        "user_id": user_id,
-                        "entry_date": entry_date.isoformat(),
-                        "event_time": event_time or None,
-                        "notes": notes or None
-                    }).execute()
-                    st.session_state.flash_message = "Bowel entry saved."
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        elif entry_type == "Mood":
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-header-purple">🙂 Mood</div>', unsafe_allow_html=True)
-            with st.form("mood_form"):
-                entry_date = st.date_input("Date", value=date.today(), key="mood_date")
-                mood_rating = st.selectbox("Mood", ["Very low", "Low", "OK", "Good", "Very good"])
-                notes = st.text_area("Notes")
-                submitted = st.form_submit_button("Save mood entry")
-                if submitted:
-                    supabase.table("mood_entries").insert({
-                        "user_id": user_id,
-                        "entry_date": entry_date.isoformat(),
-                        "mood_rating": mood_rating,
-                        "notes": notes or None
-                    }).execute()
-                    st.session_state.flash_message = "Mood entry saved."
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    elif page == "View Day":
+    if page == "View Day":
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-header-dark">📅 View submitted data by day</div>', unsafe_allow_html=True)
         selected_day = st.date_input("Select day", value=date.today(), key="view_day")
@@ -475,22 +392,47 @@ else:
         with s5:
             summary_card("Mood entries", total_mood)
 
-        st.markdown("### 🍽️ Food")
+        # FOOD
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header-orange">🍽️ Food</div>', unsafe_allow_html=True)
+
+        with st.expander("Add food entry"):
+            with st.form("food_form"):
+                entry_date = st.date_input("Date", value=selected_day, key="food_date")
+                meal_type = st.selectbox("Meal type", ["Breakfast", "Lunch", "Dinner", "Snack"], key="food_meal_type")
+                food_notes = st.text_area("Food notes", key="food_notes")
+                calories = st.number_input("Calories", min_value=0, step=10, key="food_calories")
+                submitted = st.form_submit_button("Save food entry")
+                if submitted:
+                    supabase.table("food_entries").insert({
+                        "user_id": user_id,
+                        "entry_date": entry_date.isoformat(),
+                        "meal_type": meal_type,
+                        "food_notes": food_notes or None,
+                        "calories": int(calories)
+                    }).execute()
+                    st.session_state.flash_message = "Food entry saved."
+                    st.rerun()
+
         display_day_table(food_df, ["entry_date", "meal_type", "food_notes", "calories"], {
             "entry_date": "Date", "meal_type": "Meal", "food_notes": "Food", "calories": "Calories"
         })
 
         if not food_df.empty:
-            food_options = {f"ID {int(r['id'])} - {r.get('meal_type', '')}": r for _, r in food_df.iterrows()}
-            selected_food = st.selectbox("Select food entry", list(food_options.keys()), key="food_edit_select")
-            row = food_options[selected_food]
+            food_options = build_selector_options(
+                food_df,
+                lambda r: f"{int(r['id'])} — {r.get('meal_type', '')} — {int(r.get('calories') or 0)} kcal"
+            )
+            selected_food = st.selectbox("Select food entry", [label for label, _ in food_options], key="food_edit_select")
+            row = get_selected_row(food_df, selected_food, food_options)
+            row_id = int(row["id"])
 
-            with st.form("food_edit_form"):
-                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key="food_edit_date")
+            with st.form(f"food_edit_form_{row_id}"):
+                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key=f"food_edit_date_{row_id}")
                 meal_list = ["Breakfast", "Lunch", "Dinner", "Snack"]
-                edit_meal = st.selectbox("Meal type", meal_list, index=meal_list.index(row["meal_type"]) if row["meal_type"] in meal_list else 0, key="food_edit_meal")
-                edit_notes = st.text_area("Food notes", value=row.get("food_notes") or "", key="food_edit_notes")
-                edit_calories = st.number_input("Calories", min_value=0, step=10, value=int(row.get("calories") or 0), key="food_edit_calories")
+                edit_meal = st.selectbox("Meal type", meal_list, index=meal_list.index(row["meal_type"]) if row["meal_type"] in meal_list else 0, key=f"food_edit_meal_{row_id}")
+                edit_notes = st.text_area("Food notes", value=row.get("food_notes") or "", key=f"food_edit_notes_{row_id}")
+                edit_calories = st.number_input("Calories", min_value=0, step=10, value=int(row.get("calories") or 0), key=f"food_edit_calories_{row_id}")
 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -504,29 +446,53 @@ else:
                         "meal_type": edit_meal,
                         "food_notes": edit_notes or None,
                         "calories": int(edit_calories)
-                    }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    }).eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Food entry updated."
                     st.rerun()
 
                 if delete_food:
-                    supabase.table("food_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    supabase.table("food_entries").delete().eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Food entry deleted."
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("### 💧 Hydration")
+        # HYDRATION
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header-pink">💧 Hydration</div>', unsafe_allow_html=True)
+
+        with st.expander("Add hydration entry"):
+            with st.form("hydration_form"):
+                entry_date = st.date_input("Date", value=selected_day, key="hydration_date")
+                amount_litres = st.number_input("Amount (litres)", min_value=0.0, step=0.1, key="hydration_amount")
+                drink_type = st.text_input("Drink type", key="hydration_drink")
+                submitted = st.form_submit_button("Save hydration entry")
+                if submitted:
+                    supabase.table("hydration_entries").insert({
+                        "user_id": user_id,
+                        "entry_date": entry_date.isoformat(),
+                        "amount_litres": float(amount_litres),
+                        "drink_type": drink_type or None
+                    }).execute()
+                    st.session_state.flash_message = "Hydration entry saved."
+                    st.rerun()
+
         display_day_table(hydration_df, ["entry_date", "amount_litres", "drink_type"], {
             "entry_date": "Date", "amount_litres": "Litres", "drink_type": "Drink"
         })
 
         if not hydration_df.empty:
-            hydration_options = {f"ID {int(r['id'])} - {r.get('drink_type') or 'Drink'}": r for _, r in hydration_df.iterrows()}
-            selected_hydration = st.selectbox("Select hydration entry", list(hydration_options.keys()), key="hydration_edit_select")
-            row = hydration_options[selected_hydration]
+            hydration_options = build_selector_options(
+                hydration_df,
+                lambda r: f"{int(r['id'])} — {(r.get('drink_type') or 'Drink')} — {float(r.get('amount_litres') or 0):.1f} L"
+            )
+            selected_hydration = st.selectbox("Select hydration entry", [label for label, _ in hydration_options], key="hydration_edit_select")
+            row = get_selected_row(hydration_df, selected_hydration, hydration_options)
+            row_id = int(row["id"])
 
-            with st.form("hydration_edit_form"):
-                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key="hydration_edit_date")
-                edit_amount = st.number_input("Amount (litres)", min_value=0.0, step=0.1, value=float(row.get("amount_litres") or 0.0), key="hydration_edit_amount")
-                edit_drink = st.text_input("Drink type", value=row.get("drink_type") or "", key="hydration_edit_drink")
+            with st.form(f"hydration_edit_form_{row_id}"):
+                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key=f"hydration_edit_date_{row_id}")
+                edit_amount = st.number_input("Amount (litres)", min_value=0.0, step=0.1, value=float(row.get("amount_litres") or 0.0), key=f"hydration_edit_amount_{row_id}")
+                edit_drink = st.text_input("Drink type", value=row.get("drink_type") or "", key=f"hydration_edit_drink_{row_id}")
 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -539,30 +505,54 @@ else:
                         "entry_date": edit_date.isoformat(),
                         "amount_litres": float(edit_amount),
                         "drink_type": edit_drink or None
-                    }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    }).eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Hydration entry updated."
                     st.rerun()
 
                 if delete_hydration:
-                    supabase.table("hydration_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    supabase.table("hydration_entries").delete().eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Hydration entry deleted."
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("### 😴 Sleep")
+        # SLEEP
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header-blue">😴 Sleep</div>', unsafe_allow_html=True)
+
+        with st.expander("Add sleep entry"):
+            with st.form("sleep_form"):
+                entry_date = st.date_input("Date", value=selected_day, key="sleep_date")
+                sleep_hours = st.number_input("Sleep hours", min_value=0.0, step=0.5, key="sleep_hours")
+                sleep_quality = st.selectbox("Sleep quality", ["Poor", "OK", "Good", "Great"], key="sleep_quality")
+                submitted = st.form_submit_button("Save sleep entry")
+                if submitted:
+                    supabase.table("sleep_entries").insert({
+                        "user_id": user_id,
+                        "entry_date": entry_date.isoformat(),
+                        "sleep_hours": float(sleep_hours),
+                        "sleep_quality": sleep_quality
+                    }).execute()
+                    st.session_state.flash_message = "Sleep entry saved."
+                    st.rerun()
+
         display_day_table(sleep_df, ["entry_date", "sleep_hours", "sleep_quality"], {
             "entry_date": "Date", "sleep_hours": "Hours", "sleep_quality": "Quality"
         })
 
         if not sleep_df.empty:
-            sleep_options = {f"ID {int(r['id'])} - {r.get('sleep_hours', 0)} hrs": r for _, r in sleep_df.iterrows()}
-            selected_sleep = st.selectbox("Select sleep entry", list(sleep_options.keys()), key="sleep_edit_select")
-            row = sleep_options[selected_sleep]
+            sleep_options = build_selector_options(
+                sleep_df,
+                lambda r: f"{int(r['id'])} — {float(r.get('sleep_hours') or 0):.1f} hrs — {r.get('sleep_quality') or ''}"
+            )
+            selected_sleep = st.selectbox("Select sleep entry", [label for label, _ in sleep_options], key="sleep_edit_select")
+            row = get_selected_row(sleep_df, selected_sleep, sleep_options)
+            row_id = int(row["id"])
 
-            with st.form("sleep_edit_form"):
-                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key="sleep_edit_date")
-                edit_hours = st.number_input("Sleep hours", min_value=0.0, step=0.5, value=float(row.get("sleep_hours") or 0.0), key="sleep_edit_hours")
+            with st.form(f"sleep_edit_form_{row_id}"):
+                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key=f"sleep_edit_date_{row_id}")
+                edit_hours = st.number_input("Sleep hours", min_value=0.0, step=0.5, value=float(row.get("sleep_hours") or 0.0), key=f"sleep_edit_hours_{row_id}")
                 qualities = ["Poor", "OK", "Good", "Great"]
-                edit_quality = st.selectbox("Sleep quality", qualities, index=qualities.index(row["sleep_quality"]) if row.get("sleep_quality") in qualities else 0, key="sleep_edit_quality")
+                edit_quality = st.selectbox("Sleep quality", qualities, index=qualities.index(row["sleep_quality"]) if row.get("sleep_quality") in qualities else 0, key=f"sleep_edit_quality_{row_id}")
 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -575,29 +565,53 @@ else:
                         "entry_date": edit_date.isoformat(),
                         "sleep_hours": float(edit_hours),
                         "sleep_quality": edit_quality
-                    }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    }).eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Sleep entry updated."
                     st.rerun()
 
                 if delete_sleep:
-                    supabase.table("sleep_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    supabase.table("sleep_entries").delete().eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Sleep entry deleted."
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("### 🩺 Bowel Movements")
+        # BOWEL
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header-green">🩺 Bowel Movement</div>', unsafe_allow_html=True)
+
+        with st.expander("Add bowel entry"):
+            with st.form("bowel_form"):
+                entry_date = st.date_input("Date", value=selected_day, key="bowel_date")
+                event_time = st.text_input("Time", placeholder="e.g. 07:30", key="bowel_time")
+                notes = st.text_area("Notes", key="bowel_notes")
+                submitted = st.form_submit_button("Save bowel entry")
+                if submitted:
+                    supabase.table("bowel_entries").insert({
+                        "user_id": user_id,
+                        "entry_date": entry_date.isoformat(),
+                        "event_time": event_time or None,
+                        "notes": notes or None
+                    }).execute()
+                    st.session_state.flash_message = "Bowel entry saved."
+                    st.rerun()
+
         display_day_table(bowel_df, ["entry_date", "event_time", "notes"], {
             "entry_date": "Date", "event_time": "Time", "notes": "Notes"
         })
 
         if not bowel_df.empty:
-            bowel_options = {f"ID {int(r['id'])} - {r.get('event_time') or 'No time'}": r for _, r in bowel_df.iterrows()}
-            selected_bowel = st.selectbox("Select bowel entry", list(bowel_options.keys()), key="bowel_edit_select")
-            row = bowel_options[selected_bowel]
+            bowel_options = build_selector_options(
+                bowel_df,
+                lambda r: f"{int(r['id'])} — {(r.get('event_time') or 'No time')} — {(r.get('notes') or '')[:20]}"
+            )
+            selected_bowel = st.selectbox("Select bowel entry", [label for label, _ in bowel_options], key="bowel_edit_select")
+            row = get_selected_row(bowel_df, selected_bowel, bowel_options)
+            row_id = int(row["id"])
 
-            with st.form("bowel_edit_form"):
-                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key="bowel_edit_date")
-                edit_time = st.text_input("Time", value=row.get("event_time") or "", key="bowel_edit_time")
-                edit_notes = st.text_area("Notes", value=row.get("notes") or "", key="bowel_edit_notes")
+            with st.form(f"bowel_edit_form_{row_id}"):
+                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key=f"bowel_edit_date_{row_id}")
+                edit_time = st.text_input("Time", value=row.get("event_time") or "", key=f"bowel_edit_time_{row_id}")
+                edit_notes = st.text_area("Notes", value=row.get("notes") or "", key=f"bowel_edit_notes_{row_id}")
 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -610,30 +624,54 @@ else:
                         "entry_date": edit_date.isoformat(),
                         "event_time": edit_time or None,
                         "notes": edit_notes or None
-                    }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    }).eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Bowel entry updated."
                     st.rerun()
 
                 if delete_bowel:
-                    supabase.table("bowel_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    supabase.table("bowel_entries").delete().eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Bowel entry deleted."
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("### 🙂 Mood")
+        # MOOD
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header-purple">🙂 Mood</div>', unsafe_allow_html=True)
+
+        with st.expander("Add mood entry"):
+            with st.form("mood_form"):
+                entry_date = st.date_input("Date", value=selected_day, key="mood_date")
+                mood_rating = st.selectbox("Mood", ["Very low", "Low", "OK", "Good", "Very good"], key="mood_rating")
+                notes = st.text_area("Notes", key="mood_notes")
+                submitted = st.form_submit_button("Save mood entry")
+                if submitted:
+                    supabase.table("mood_entries").insert({
+                        "user_id": user_id,
+                        "entry_date": entry_date.isoformat(),
+                        "mood_rating": mood_rating,
+                        "notes": notes or None
+                    }).execute()
+                    st.session_state.flash_message = "Mood entry saved."
+                    st.rerun()
+
         display_day_table(mood_df, ["entry_date", "mood_rating", "notes"], {
             "entry_date": "Date", "mood_rating": "Mood", "notes": "Notes"
         })
 
         if not mood_df.empty:
-            mood_options = {f"ID {int(r['id'])} - {r.get('mood_rating') or 'Mood'}": r for _, r in mood_df.iterrows()}
-            selected_mood = st.selectbox("Select mood entry", list(mood_options.keys()), key="mood_edit_select")
-            row = mood_options[selected_mood]
+            mood_options = build_selector_options(
+                mood_df,
+                lambda r: f"{int(r['id'])} — {r.get('mood_rating') or ''} — {(r.get('notes') or '')[:20]}"
+            )
+            selected_mood = st.selectbox("Select mood entry", [label for label, _ in mood_options], key="mood_edit_select")
+            row = get_selected_row(mood_df, selected_mood, mood_options)
+            row_id = int(row["id"])
 
-            with st.form("mood_edit_form"):
-                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key="mood_edit_date")
+            with st.form(f"mood_edit_form_{row_id}"):
+                edit_date = st.date_input("Date", value=pd.to_datetime(row["entry_date"]).date(), key=f"mood_edit_date_{row_id}")
                 moods = ["Very low", "Low", "OK", "Good", "Very good"]
-                edit_rating = st.selectbox("Mood", moods, index=moods.index(row["mood_rating"]) if row.get("mood_rating") in moods else 0, key="mood_edit_rating")
-                edit_notes = st.text_area("Notes", value=row.get("notes") or "", key="mood_edit_notes")
+                edit_rating = st.selectbox("Mood", moods, index=moods.index(row["mood_rating"]) if row.get("mood_rating") in moods else 0, key=f"mood_edit_rating_{row_id}")
+                edit_notes = st.text_area("Notes", value=row.get("notes") or "", key=f"mood_edit_notes_{row_id}")
 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -646,14 +684,15 @@ else:
                         "entry_date": edit_date.isoformat(),
                         "mood_rating": edit_rating,
                         "notes": edit_notes or None
-                    }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    }).eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Mood entry updated."
                     st.rerun()
 
                 if delete_mood:
-                    supabase.table("mood_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
+                    supabase.table("mood_entries").delete().eq("id", row_id).eq("user_id", user_id).execute()
                     st.session_state.flash_message = "Mood entry deleted."
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     elif page == "View Trends":
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -692,34 +731,31 @@ else:
         mood_df = range_filter(load_table_for_user("mood_entries", user_id))
 
         st.markdown("### Food — calories by day")
-        if not food_df.empty and "calories" in food_df.columns:
-            daily = prepare_daily_series(food_df, "entry_date", "calories")
-            daily = daily[(daily["entry_date"].dt.date >= start_date) & (daily["entry_date"].dt.date <= end_date)]
-            fig = px.line(daily, x="entry_date", y="calories", markers=True)
-            fig.update_traces(line=dict(color="#ff8c42", width=3))
-            fig.update_xaxes(dtick="D", tickformat="%d %b")
+        food_daily = prepare_daily_series(food_df, "entry_date", "calories", start_date, end_date)
+        if not food_daily.empty:
+            fig = px.line(food_daily, x="entry_date", y="calories", markers=True)
+            fig.update_traces(line=dict(color="#ff8c42", width=3, shape="spline"))
+            fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No food data in this range.")
 
         st.markdown("### Hydration — litres by day")
-        if not hydration_df.empty and "amount_litres" in hydration_df.columns:
-            daily = prepare_daily_series(hydration_df, "entry_date", "amount_litres")
-            daily = daily[(daily["entry_date"].dt.date >= start_date) & (daily["entry_date"].dt.date <= end_date)]
-            fig = px.line(daily, x="entry_date", y="amount_litres", markers=True)
-            fig.update_traces(line=dict(color="#ff5c8a", width=3))
-            fig.update_xaxes(dtick="D", tickformat="%d %b")
+        hydration_daily = prepare_daily_series(hydration_df, "entry_date", "amount_litres", start_date, end_date)
+        if not hydration_daily.empty:
+            fig = px.line(hydration_daily, x="entry_date", y="amount_litres", markers=True)
+            fig.update_traces(line=dict(color="#ff5c8a", width=3, shape="spline"))
+            fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No hydration data in this range.")
 
         st.markdown("### Sleep — hours by day")
-        if not sleep_df.empty and "sleep_hours" in sleep_df.columns:
-            daily = prepare_daily_series(sleep_df, "entry_date", "sleep_hours")
-            daily = daily[(daily["entry_date"].dt.date >= start_date) & (daily["entry_date"].dt.date <= end_date)]
-            fig = px.line(daily, x="entry_date", y="sleep_hours", markers=True)
-            fig.update_traces(line=dict(color="#5b5ce6", width=3))
-            fig.update_xaxes(dtick="D", tickformat="%d %b")
+        sleep_daily = prepare_daily_series(sleep_df, "entry_date", "sleep_hours", start_date, end_date)
+        if not sleep_daily.empty:
+            fig = px.line(sleep_daily, x="entry_date", y="sleep_hours", markers=True)
+            fig.update_traces(line=dict(color="#5b5ce6", width=3, shape="spline"))
+            fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No sleep data in this range.")
@@ -728,9 +764,14 @@ else:
         if not bowel_df.empty:
             bowel_daily = bowel_df.groupby("entry_date", as_index=False).size()
             bowel_daily.columns = ["entry_date", "count"]
+        else:
+            bowel_daily = pd.DataFrame(columns=["entry_date", "count"])
+
+        bowel_daily = prepare_daily_series(bowel_daily, "entry_date", "count", start_date, end_date)
+        if not bowel_daily.empty:
             fig = px.line(bowel_daily, x="entry_date", y="count", markers=True)
-            fig.update_traces(line=dict(color="#20c997", width=3))
-            fig.update_xaxes(dtick="D", tickformat="%d %b")
+            fig.update_traces(line=dict(color="#20c997", width=3, shape="spline"))
+            fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No bowel data in this range.")
@@ -739,9 +780,14 @@ else:
         if not mood_df.empty:
             mood_daily = mood_df.groupby("entry_date", as_index=False).size()
             mood_daily.columns = ["entry_date", "count"]
+        else:
+            mood_daily = pd.DataFrame(columns=["entry_date", "count"])
+
+        mood_daily = prepare_daily_series(mood_daily, "entry_date", "count", start_date, end_date)
+        if not mood_daily.empty:
             fig = px.line(mood_daily, x="entry_date", y="count", markers=True)
-            fig.update_traces(line=dict(color="#845ef7", width=3))
-            fig.update_xaxes(dtick="D", tickformat="%d %b")
+            fig.update_traces(line=dict(color="#845ef7", width=3, shape="spline"))
+            fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No mood data in this range.")
