@@ -74,7 +74,7 @@ def apply_custom_styles():
         border: 1px solid #2f3542;
     }
 
-    div.stButton > button p, 
+    div.stButton > button p,
     div.stButton > button span,
     div.stFormSubmitButton > button p,
     div.stFormSubmitButton > button span {
@@ -101,6 +101,29 @@ def apply_custom_styles():
         background-color: white !important;
         color: #1f1f1f !important;
     }
+
+    [role="listbox"] {
+        background: white !important;
+        color: #1f1f1f !important;
+    }
+
+    [role="option"] {
+        background: white !important;
+        color: #1f1f1f !important;
+    }
+
+    [role="option"]:hover {
+        background: #f1f3f5 !important;
+        color: #1f1f1f !important;
+    }
+
+    [role="option"] * {
+        color: #1f1f1f !important;
+    }
+
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -120,19 +143,8 @@ def get_cookie_manager():
 def save_login_cookie(user_email, user_id):
     cookie_manager = get_cookie_manager()
     expiry = datetime.utcnow() + timedelta(days=1)
-
-    cookie_manager.set(
-        "ht_user_email",
-        user_email,
-        expires_at=expiry,
-        key="set_ht_user_email"
-    )
-    cookie_manager.set(
-        "ht_user_id",
-        user_id,
-        expires_at=expiry,
-        key="set_ht_user_id"
-    )
+    cookie_manager.set("ht_user_email", user_email, expires_at=expiry, key="set_ht_user_email")
+    cookie_manager.set("ht_user_id", user_id, expires_at=expiry, key="set_ht_user_id")
 
 
 def clear_login_cookie():
@@ -144,7 +156,6 @@ def clear_login_cookie():
 def restore_login_from_cookie():
     cookie_manager = get_cookie_manager()
     cookies = cookie_manager.get_all(key="get_all_cookies")
-
     if st.session_state.get("user") is None and cookies:
         cookie_email = cookies.get("ht_user_email")
         cookie_user_id = cookies.get("ht_user_id")
@@ -231,6 +242,12 @@ def summary_card(label, value):
     )
 
 
+def show_flash_message():
+    if st.session_state.flash_message:
+        st.success(st.session_state.flash_message)
+        st.session_state.flash_message = None
+
+
 st.set_page_config(page_title="Health Tracker", layout="wide")
 apply_custom_styles()
 
@@ -238,11 +255,14 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "page" not in st.session_state:
     st.session_state.page = "Log Entry"
+if "flash_message" not in st.session_state:
+    st.session_state.flash_message = None
 
 st.title("Health Tracker")
 
 get_cookie_manager()
 restore_login_from_cookie()
+show_flash_message()
 
 if st.session_state.user is None:
     st.caption("Sign up or log in to access your tracker")
@@ -267,7 +287,7 @@ if st.session_state.user is None:
                     })
                     st.session_state.user = result.user
                     save_login_cookie(result.user.email, result.user.id)
-                    st.success("Logged in successfully.")
+                    st.session_state.flash_message = "Logged in successfully."
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {str(e)}")
@@ -290,7 +310,8 @@ if st.session_state.user is None:
                         "email": signup_email,
                         "password": signup_password
                     })
-                    st.success("Account created. You can now log in.")
+                    st.session_state.flash_message = "Account created. You can now log in."
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Sign-up failed: {str(e)}")
 
@@ -316,6 +337,7 @@ else:
         if st.button("Log out"):
             clear_login_cookie()
             st.session_state.user = None
+            st.session_state.flash_message = "Logged out successfully."
             st.rerun()
 
     page = st.session_state.page
@@ -343,7 +365,7 @@ else:
                         "food_notes": food_notes or None,
                         "calories": int(calories)
                     }).execute()
-                    st.success("Food entry saved.")
+                    st.session_state.flash_message = "Food entry saved."
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -362,7 +384,7 @@ else:
                         "amount_litres": float(amount_litres),
                         "drink_type": drink_type or None
                     }).execute()
-                    st.success("Hydration entry saved.")
+                    st.session_state.flash_message = "Hydration entry saved."
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -381,7 +403,7 @@ else:
                         "sleep_hours": float(sleep_hours),
                         "sleep_quality": sleep_quality
                     }).execute()
-                    st.success("Sleep entry saved.")
+                    st.session_state.flash_message = "Sleep entry saved."
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -400,7 +422,7 @@ else:
                         "event_time": event_time or None,
                         "notes": notes or None
                     }).execute()
-                    st.success("Bowel entry saved.")
+                    st.session_state.flash_message = "Bowel entry saved."
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -419,7 +441,7 @@ else:
                         "mood_rating": mood_rating,
                         "notes": notes or None
                     }).execute()
-                    st.success("Mood entry saved.")
+                    st.session_state.flash_message = "Mood entry saved."
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -483,12 +505,12 @@ else:
                         "food_notes": edit_notes or None,
                         "calories": int(edit_calories)
                     }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Food entry updated.")
+                    st.session_state.flash_message = "Food entry updated."
                     st.rerun()
 
                 if delete_food:
                     supabase.table("food_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Food entry deleted.")
+                    st.session_state.flash_message = "Food entry deleted."
                     st.rerun()
 
         st.markdown("### 💧 Hydration")
@@ -518,12 +540,12 @@ else:
                         "amount_litres": float(edit_amount),
                         "drink_type": edit_drink or None
                     }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Hydration entry updated.")
+                    st.session_state.flash_message = "Hydration entry updated."
                     st.rerun()
 
                 if delete_hydration:
                     supabase.table("hydration_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Hydration entry deleted.")
+                    st.session_state.flash_message = "Hydration entry deleted."
                     st.rerun()
 
         st.markdown("### 😴 Sleep")
@@ -554,12 +576,12 @@ else:
                         "sleep_hours": float(edit_hours),
                         "sleep_quality": edit_quality
                     }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Sleep entry updated.")
+                    st.session_state.flash_message = "Sleep entry updated."
                     st.rerun()
 
                 if delete_sleep:
                     supabase.table("sleep_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Sleep entry deleted.")
+                    st.session_state.flash_message = "Sleep entry deleted."
                     st.rerun()
 
         st.markdown("### 🩺 Bowel Movements")
@@ -589,12 +611,12 @@ else:
                         "event_time": edit_time or None,
                         "notes": edit_notes or None
                     }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Bowel entry updated.")
+                    st.session_state.flash_message = "Bowel entry updated."
                     st.rerun()
 
                 if delete_bowel:
                     supabase.table("bowel_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Bowel entry deleted.")
+                    st.session_state.flash_message = "Bowel entry deleted."
                     st.rerun()
 
         st.markdown("### 🙂 Mood")
@@ -625,12 +647,12 @@ else:
                         "mood_rating": edit_rating,
                         "notes": edit_notes or None
                     }).eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Mood entry updated.")
+                    st.session_state.flash_message = "Mood entry updated."
                     st.rerun()
 
                 if delete_mood:
                     supabase.table("mood_entries").delete().eq("id", int(row["id"])).eq("user_id", user_id).execute()
-                    st.success("Mood entry deleted.")
+                    st.session_state.flash_message = "Mood entry deleted."
                     st.rerun()
 
     elif page == "View Trends":
