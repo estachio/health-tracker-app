@@ -124,6 +124,24 @@ def apply_custom_styles():
     [data-testid="stAlert"] {
         border-radius: 12px;
     }
+
+    /* Date input fixes for mobile */
+    [data-testid="stDateInput"] input {
+        background-color: white !important;
+        color: #1f1f1f !important;
+        -webkit-text-fill-color: #1f1f1f !important;
+    }
+
+    [data-testid="stDateInput"] > div,
+    [data-testid="stDateInput"] div[data-baseweb="input"],
+    [data-testid="stDateInput"] div[data-baseweb="base-input"] {
+        background-color: white !important;
+        color: #1f1f1f !important;
+    }
+
+    [data-testid="stDateInput"] svg {
+        fill: #1f1f1f !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -269,6 +287,23 @@ def build_selector_options(df, label_builder):
 def get_selected_row(df, selected_label, options):
     selected_id = dict(options)[selected_label]
     return df[df["id"].astype(int) == int(selected_id)].iloc[0]
+
+
+def add_mood_score(df):
+    mood_map = {
+        "Very low": 1,
+        "Low": 2,
+        "OK": 3,
+        "Good": 4,
+        "Very good": 5
+    }
+
+    if df.empty or "mood_rating" not in df.columns:
+        return df
+
+    temp = df.copy()
+    temp["mood_score"] = temp["mood_rating"].map(mood_map)
+    return temp
 
 
 st.set_page_config(page_title="Health Tracker", layout="wide")
@@ -776,18 +811,22 @@ else:
         else:
             st.info("No bowel data in this range.")
 
-        st.markdown("### Mood — entries per day")
-        if not mood_df.empty:
-            mood_daily = mood_df.groupby("entry_date", as_index=False).size()
-            mood_daily.columns = ["entry_date", "count"]
-        else:
-            mood_daily = pd.DataFrame(columns=["entry_date", "count"])
+        st.markdown("### Mood — score by day")
+        mood_df = add_mood_score(mood_df)
 
-        mood_daily = prepare_daily_series(mood_daily, "entry_date", "count", start_date, end_date)
-        if not mood_daily.empty:
-            fig = px.line(mood_daily, x="entry_date", y="count", markers=True)
+        if not mood_df.empty and "mood_score" in mood_df.columns:
+            mood_daily = mood_df.groupby("entry_date", as_index=False)["mood_score"].mean()
+            mood_daily = prepare_daily_series(mood_daily, "entry_date", "mood_score", start_date, end_date)
+
+            fig = px.line(mood_daily, x="entry_date", y="mood_score", markers=True)
             fig.update_traces(line=dict(color="#845ef7", width=3, shape="spline"))
             fig.update_xaxes(range=[pd.to_datetime(start_date), pd.to_datetime(end_date)], dtick="D", tickformat="%d %b")
+            fig.update_yaxes(
+                range=[1, 5],
+                tickmode="array",
+                tickvals=[1, 2, 3, 4, 5],
+                ticktext=["Very low", "Low", "OK", "Good", "Very good"]
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No mood data in this range.")
